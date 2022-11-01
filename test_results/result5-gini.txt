@@ -1,0 +1,4 @@
+Sample Accuracy: 0.7065217391304348
+SK Sample Accuracy: 0.6811594202898551
+Accuracy: 0.7446808510638298
+SK Accuracy: 0.75
