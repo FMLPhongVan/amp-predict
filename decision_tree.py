@@ -11,10 +11,9 @@ class Node():
 
 
 class DecisionTree():
-    def __init__(self, max_depth=5, min_samples_split=2, min_impurity=1e-7, mode='entropy'):
+    def __init__(self, max_depth=5, min_samples_split=2, mode='entropy'):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
-        self.min_impurity = min_impurity
         self.root = None
         self.mode = mode
 
@@ -62,87 +61,86 @@ class DecisionTree():
         else:
             return self._traverse_tree(X, tree.right)
 
-    def _grow_tree(self, dataset, depth=0):
-        X, Y = dataset[:,:-1], dataset[:,-1]
+    def _grow_tree(self, dataset, depth = 0):
+        X, Y = dataset[:, :-1], dataset[:, -1]
         num_samples, num_features = np.shape(X)
 
-        # split until stopping conditions are met
-        if num_samples>=self.min_samples_split and depth<=self.max_depth:
-            # find the best split
-            feature_index, threshold, left, right, info_gain = self._best_split(dataset, num_samples, num_features)
-            # check if information gain is positive
-            if (info_gain > 0 and self.mode == 'entropy') or (info_gain >= 0 and self.mode == 'gini'):
-                # recur left
-                left_subtree = self._grow_tree(left, depth + 1)
-                # recur right
-                right_subtree = self._grow_tree(right, depth + 1)
-                # return decision node
-                return Node(feature_index, threshold, left_subtree, right_subtree, info_gain)
+        if num_features == 1:
+            return Node(value=self._most_common_label(Y))
 
-        # compute leaf node
+        if num_samples >= self.min_samples_split and depth < self.max_depth:
+            feature_id, threshold, dataset_left, dataset_right = self._get_best_split(dataset, num_samples, num_features)
+
+            if dataset_left is not None and dataset_right is not None:
+                left = self._grow_tree(dataset_left, depth + 1)
+                right = self._grow_tree(dataset_right, depth + 1)
+                return Node(feature_id, threshold, left, right)
+
         leaf_value = self._most_common_label(Y)
-        # return leaf node
         return Node(value=leaf_value)
-
-    def _best_split(self, dataset, num_samples, num_features):
-        max_info_gain = -float('inf')
-        #if self.mode == 'gini': max_info_gain = -max_info_gain
-        ans_feature_idx = None
-        ans_threshold = None
-        ans_dataset_left = None
-        ans_dataset_right = None
-        ans_info_gain = max_info_gain
-        for feature_idx in range(num_features):
-            feature_values = dataset[:, feature_idx]
-            unique_values = np.unique(feature_values)
-            for threshold in unique_values:
-                dataset_left, dataset_right = self._split(dataset, feature_idx, threshold)
-                if len(dataset_left) == 0 or len(dataset_right) == 0:
-                    continue
-                y_left = dataset_left[:, -1]
-                y_right = dataset_right[:, -1]
-                info_gain = self._information_gain(dataset[:, -1], y_left, y_right, self.mode)
-
-                if info_gain > max_info_gain:
-                    max_info_gain = info_gain
-                    ans_feature_idx = feature_idx
-                    ans_threshold = threshold
-                    ans_dataset_left = dataset_left
-                    ans_dataset_right = dataset_right
-                    ans_info_gain = max_info_gain
-        return ans_feature_idx, ans_threshold, ans_dataset_left, ans_dataset_right, ans_info_gain
-
-    def _split(self, dataset, feature_idx, threshold):
-        dataset_left = np.array([row for row in dataset if row[feature_idx] <= threshold])
-        dataset_right = np.array([row for row in dataset if row[feature_idx] > threshold])
-        return dataset_left, dataset_right
-
-    def _information_gain(self, y, y_left, y_right, criterion = 'entropy'):
-        if criterion == 'entropy':
-            return self._entropy(y) - (len(y_left) / len(y)) * self._entropy(y_left) - (len(y_right) / len(y)) * self._entropy(y_right)
-        elif criterion == 'gini':
-            return 1 - (len(y_left) / len(y)) * self._gini_index(y_left) - (len(y_right) / len(y)) * self._gini_index(y_right)
-
-
-
-
 
     def _most_common_label(self, y):
         y = list(y)
         return max(y, key=y.count)
 
+    def _get_best_split(self, dataset, num_samples, num_features):
+        best_split_scores = 1
+        if self.mode == 'entropy':
+            best_split_scores = -float('inf')
+
+        best_feature_id = None
+        best_threshold = None
+        best_left = None
+        best_right = None
+
+        for feature_id in range(num_features):
+            feature_values = dataset[:, feature_id]
+            unique_values = np.unique(feature_values)
+
+            for threshold in unique_values:
+                dataset_left, dataset_right = self._split(dataset, feature_id, threshold)
+                if len(dataset_left) == 0 or len(dataset_right) == 0: continue
+                parent, left, right = dataset[:, -1], dataset_left[:, -1], dataset_right[:, -1]
+                info_gain = self._information_gain(parent, left, right)
+
+                if self._better(info_gain, best_split_scores):
+                    best_split_scores = info_gain
+                    best_feature_id = feature_id
+                    best_threshold = threshold
+                    best_left = dataset_left
+                    best_right = dataset_right
+
+        return best_feature_id, best_threshold, best_left, best_right
+
+    def _split(self, dataset, feature_id, threshold):
+        dataset_left = np.array([row for row in dataset if row[feature_id] <= threshold])
+        dataset_right = np.array([row for row in dataset if row[feature_id] > threshold])
+        return dataset_left, dataset_right
+
+    def _information_gain(self, parent, left, right):
+        if self.mode == 'entropy':
+            return self._entropy(parent) - (len(left) / len(parent)) * self._entropy(left) - (len(right) / len(parent)) * self._entropy(right)
+        else:
+            return (len(left) / len(parent)) * self._gini_index(left) + (len(right) / len(parent)) * self._gini_index(right)
+    def _better(self, a, b):
+        if self.mode == 'entropy':
+            return a > b
+        else:
+            return a < b
+
+    def _gini_index(self, y):
+        classes = np.unique(y)
+        gini = 0
+        for label in classes:
+            p = len(y[y == label]) / len(y)
+            gini += p * p
+        return 1 - gini
+
     def _entropy(self, y):
-        class_labels = np.unique(y)
+        classes = np.unique(y)
         entropy = 0
-        for cls in class_labels:
-            p = len(y[y == cls]) / len(y)
+        for label in classes:
+            p = len(y[y == label]) / len(y)
             entropy += -p * np.log2(p)
         return entropy
 
-    def _gini_index(self, y):
-        class_labels = np.unique(y)
-        gini = 0
-        for cls in class_labels:
-            p = len(y[y == cls]) / len(y)
-            gini += p**2
-        return 1 - gini
